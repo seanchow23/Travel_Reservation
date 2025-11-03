@@ -30,7 +30,7 @@ INSERT INTO Airport (Id, Name, City, Country) VALUES
 ('SFO', 'San Francisco International', 'San Francisco', 'United States of America'),
 ('HND', 'Tokyo International', 'Tokyo', 'Japan');
 
--- Insert Flights (FIXED: Added MinLengthOfStay and MaxLengthOfStay)
+-- Insert Flights (Added MinLengthOfStay and MaxLengthOfStay)
 INSERT INTO Flight (AirlineID, FlightNo, NoOfSeats, DaysOperating, MinLengthOfStay, MaxLengthOfStay)
 VALUES
 ('AA', 111, 100, '1010100', 0, 30),

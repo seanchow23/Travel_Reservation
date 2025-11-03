@@ -1,10 +1,5 @@
--- ============================================================================
--- Section 3.2 - Customer-Representative-Level Transactions (CORRECTED)
--- ============================================================================
-
 USE project_2;
 
--- ============================================================================
 -- TRANSACTION 3.2.1: Record a Reservation (One-Way)
 -- ============================================================================
 
@@ -118,7 +113,6 @@ GROUP BY R.ResrNo, R.ResrDate, R.TotalFare, R.BookingFee,
 
 -- OUTPUT:
 /*
-[PASTE YOUR OUTPUT HERE]
 Expected: John Doe, Seat 12A, 2 legs, $250.00 fare
 */
 
@@ -346,7 +340,6 @@ SELECT COUNT(*) AS CustomerExists FROM Customer WHERE AccountNo = 444;
 
 -- OUTPUT:
 /*
-[PASTE YOUR OUTPUT HERE]
 Expected: 0 (customer deleted)
 */
 
@@ -381,7 +374,6 @@ ORDER BY P.LastName, P.FirstName;
 
 -- OUTPUT:
 /*
-[PASTE YOUR OUTPUT HERE]
 Expected: 3 customers (Jane Smith, John Doe, Rick Astley)
 */
 

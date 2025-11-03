@@ -1,26 +1,5 @@
--- ============================================================================
--- CSE 305 - PROJECT 2: SQL DML STATEMENTS
--- SECTION 3.1: MANAGER-LEVEL TRANSACTIONS (13 Transactions)
--- Online Travel Reservation System
--- ============================================================================
--- 
--- Team Name: [INSERT YOUR TEAM NAME HERE]
--- 
--- Team Members:
---   1. [Name] - [Email]
---   2. [Name] - [Email]
---   3. [Name] - [Email]
--- 
--- Submission Date: November 3, 2025
--- 
--- ============================================================================
--- This file contains all 13 Manager-Level transactions from Section 3.1
--- Each transaction is ready to test against your demo database
--- ============================================================================
-
 USE project_2;
 
--- ============================================================================
 -- TRANSACTION 3.1.1: Add Employee
 -- ============================================================================
 
@@ -51,6 +30,9 @@ VALUES (?, ?, ?, ?, ?);
 */
 
 -- Execution Example (Test with these values):
+-- Cleanup any existing test data
+DELETE FROM Employee WHERE SSN = 111222333;
+DELETE FROM Person WHERE Id = 104;
 
 INSERT INTO Person (Id, FirstName, LastName, Address, City, State, ZipCode, Phone)
 VALUES (104, 'David', 'Brown', '200 Oak Street', 'Stony Brook', 'NY', 11790, '631-555-0004');
@@ -72,7 +54,6 @@ WHERE E.SSN = 111222333;
 -- | 111222333 | David     | Brown    | 631-555-0004  |         0 | 2025-11-01 |      28.00 |
 -- +-----------+-----------+----------+---------------+-----------+------------+------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes: 
@@ -129,7 +110,6 @@ WHERE E.SSN = 123456789;
 -- | 123456789 | Alice     | Johnson  | 631-555-9999  |         1 |      30.00 |
 -- +-----------+-----------+----------+---------------+-----------+------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -172,7 +152,6 @@ SELECT COUNT(*) AS EmployeeExists FROM Employee WHERE SSN = 999888777;
 -- |              0 |
 -- +----------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -229,7 +208,6 @@ WHERE MONTH(ResrDate) = 1 AND YEAR(ResrDate) = 2011;
 -- |     1 | 2011 |                 3 |      5033.33 |            503.33 |       4530.00 |     1677.78 |      500.00 |     3333.33 |
 -- +-------+------+-------------------+--------------+-------------------+---------------+-------------+-------------+-------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -277,7 +255,6 @@ ORDER BY F.AirlineID, F.FlightNo;
 -- | JB        | JetBlue Airways   |      111 |       150 | 1111111       |               0 |              30 |            2 | SFO->BOS, BOS->LHR   |
 -- +-----------+-------------------+----------+-----------+---------------+-----------------+-----------------+--------------+----------------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -349,7 +326,6 @@ ORDER BY R.ResrNo, RP.SeatNo;
 -- |    111 | 2011-01-05 00:00:00 |   1200.00 |     120.00 | John      | Doe      | jdoe@woot.com     | 123-123-1234 | 33F    | Economy | Chips |
 -- +--------+---------------------+-----------+------------+-----------+----------+-------------------+--------------+--------+---------+-------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -419,7 +395,6 @@ ORDER BY R.ResrDate DESC;
 -- |    111 | 2011-01-05 00:00:00 |   1200.00 |     120.00 | John      | Doe      |       222 | jdoe@woot.com     |            2 |
 -- +--------+---------------------+-----------+------------+-----------+----------+-----------+-------------------+--------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -483,7 +458,6 @@ GROUP BY I.AirlineID, A.Name, I.FlightNo;
 -- | AA        | American Airlines |      111 |                 1 |               1 |      1200.00 |            120.00 |      1080.00 |     1200.00 |
 -- +-----------+-------------------+----------+-------------------+-----------------+--------------+-------------------+--------------+-------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -548,7 +522,6 @@ GROUP BY AP.City, AP.Country;
 -- | London           | United Kingdom |                 1 |               1 |       500.00 |             50.00 |      500.00 |
 -- +------------------+----------------+-------------------+-----------------+--------------+-------------------+-------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -613,7 +586,6 @@ GROUP BY C.AccountNo, P.FirstName, P.LastName, C.Email, C.Rating;
 -- |       222 | John      | Doe      | jdoe@woot.com     |      7 |                 1 |      1200.00 |            120.00 |     1200.00 | 2011-01-05 00:00:00 | 2011-01-05 00:00:00 |
 -- +-----------+-----------+----------+-------------------+--------+-------------------+--------------+-------------------+-------------+---------------------+---------------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -656,7 +628,6 @@ LIMIT 1;
 -- | 123456789 | Alice     | Johnson  | 631-555-0001  |                 2 |      4533.33 |            453.33 |     2266.67 |
 -- +-----------+-----------+----------+---------------+-------------------+--------------+-------------------+-------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -700,7 +671,6 @@ LIMIT 1;
 -- |       333 | Rick      | Astley   | rickroller@rolld.com    | 314-159-2653 |     10 |                 1 |      3333.33 |     3333.33 | 2011-01-13 00:00:00 |
 -- +-----------+-----------+----------+-------------------------+--------------+--------+-------------------+--------------+-------------+---------------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -777,7 +747,6 @@ LIMIT 10;
 -- | JB        | JetBlue Airways   |      111 | SFO->BOS, BOS->LHR   |                 1 |               1 |       150 |         0.67 |
 -- +-----------+-------------------+----------+----------------------+-------------------+-----------------+-----------+--------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -853,7 +822,6 @@ ORDER BY RP.Class DESC, RP.SeatNo;
 -- | John      | Doe      | 123-123-1234 | jdoe@woot.com     |       222 | 33F    | Economy | Chips |    111 |   1200.00 |
 -- +-----------+----------+--------------+-------------------+-----------+--------+---------+-------+--------+-----------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -956,7 +924,6 @@ ORDER BY ScheduledTime, FlightType;
 -- | Departure  | AM        | Air Madagascar |     1337 |     1 | 2011-01-13 07:00:00 | JFK         | TNR          | Antananarivo  | Madagascar      |
 -- +------------+-----------+----------------+----------+-------+---------------------+-------------+--------------+---------------+-----------------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
@@ -1029,20 +996,8 @@ ORDER BY L.DepTime;
 -- | AM        | Air Madagascar    |     1337 |     1 | JFK          | New York      | TNR          | Antananarivo| 2011-01-13 07:00:00 | 2011-01-14 03:00:00 | On-Time |
 -- +-----------+-------------------+----------+-------+--------------+---------------+--------------+-------------+---------------------+---------------------+---------+
 
--- [PASTE YOUR ACTUAL OUTPUT HERE]
 
 
 -- Notes:
--- THIS TRANSACTION REQUIRES SCHEMA MODIFICATION to fully implement. 
--- The current schema does not include a Status field in the Leg table.
--- To fully implement, add: ALTER TABLE Leg ADD COLUMN Status VARCHAR(20) DEFAULT 'On-Time';
 -- For demo purposes, all flights are assumed on-time.
 
--- ============================================================================
--- END OF MANAGER-LEVEL TRANSACTIONS (13/13 COMPLETED)
--- ============================================================================
-
--- Next: Complete Customer Representative-Level (Section 3.2) and 
---       Customer-Level (Section 3.3) transactions
-
--- ============================================================================
