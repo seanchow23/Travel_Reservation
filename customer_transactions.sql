@@ -80,12 +80,25 @@ Expected: AA Flight 111, departing LGA->LAX at 11:00, fare starting at $400
 -- Returns cheapest fare options first.
 -- Can be extended for round-trip and multi-city searches.
 
+
+USE project_2;
+
 -- ============================================================================
--- TRANSACTION 3.3.2: Make a Reservation (One-Way)
+-- TRANSACTION 3.3.2: Make Flight Reservations
+-- ============================================================================
+-- This transaction supports all types of reservations as specified in Section 3.3:
+-- - One-Way (Domestic and International)
+-- - Round-Trip
+-- - Multi-City
+-- - Flexible Date/Time
+-- ============================================================================
+
+-- ============================================================================
+-- TRANSACTION 3.3.2a: Make a Reservation (One-Way Domestic)
 -- ============================================================================
 
 -- DEFINITION:
--- Customer creates a new one-way flight reservation online
+-- Customer creates a one-way domestic flight reservation (within same country)
 
 -- INPUT PARAMETERS:
 --   @ResrNo        INTEGER       - Unique reservation number
@@ -105,7 +118,172 @@ Expected: AA Flight 111, departing LGA->LAX at 11:00, fare starting at $400
 /*
 START TRANSACTION;
 
+-- Check seat availability
+SELECT (F.NoOfSeats - IFNULL(S.Seats,0)) AS AvailableSeats
+FROM Flight F
+LEFT JOIN (
+  SELECT I.AirlineID, I.FlightNo, I.Date,
+         COUNT(DISTINCT RP.Id, RP.AccountNo) AS Seats
+  FROM Includes I
+  JOIN ReservationPassenger RP ON RP.ResrNo = I.ResrNo
+  WHERE I.AirlineID = ? AND I.FlightNo = ? AND I.Date = ?
+  GROUP BY I.AirlineID, I.FlightNo, I.Date
+) S ON S.AirlineID = F.AirlineID AND S.FlightNo = F.FlightNo
+WHERE F.AirlineID = ? AND F.FlightNo = ?
+FOR UPDATE;
+
 -- Insert reservation (RepSSN is NULL for online bookings)
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (?, NOW(), ?, ?, NULL, ?);
+
+-- Include all legs of the flight
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT ?, L.AirlineID, L.FlightNo, L.LegNo, ?
+FROM Leg L
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+ORDER BY L.LegNo;
+
+-- Add passenger
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (?, ?, ?, ?, ?, ?);
+
+COMMIT;
+*/
+
+-- EXECUTION WITH DEMO DATA:
+-- Scenario: John Doe books one-way domestic flight from New York to Los Angeles
+-- Flight: American Airlines 111 (LGA->LAX) on January 5, 2011
+-- Parameters: ResrNo=444, AccountNo=222, AirlineID='AA', FlightNo=111, 
+--             TravelDate='2011-01-05', PassengerId=2, PassengerAcct=222,
+--             SeatNo='12A', Class='Economy', Meal='Chicken', 
+--             TotalFare=440.00, BookingFee=44.00
+
+-- CLEANUP FIRST
+DELETE FROM ReservationPassenger WHERE ResrNo = 444;
+DELETE FROM Includes WHERE ResrNo = 444;
+DELETE FROM Reservation WHERE ResrNo = 444;
+
+START TRANSACTION;
+
+-- Check seat availability for AA 111 on 2011-01-05
+SELECT (F.NoOfSeats - IFNULL(S.Seats,0)) AS AvailableSeats
+FROM Flight F
+LEFT JOIN (
+  SELECT I.AirlineID, I.FlightNo, I.Date,
+         COUNT(DISTINCT RP.Id, RP.AccountNo) AS Seats
+  FROM Includes I
+  JOIN ReservationPassenger RP ON RP.ResrNo = I.ResrNo
+  WHERE I.AirlineID = 'AA' AND I.FlightNo = 111 AND I.Date = '2011-01-05'
+  GROUP BY I.AirlineID, I.FlightNo, I.Date
+) S ON S.AirlineID = F.AirlineID AND S.FlightNo = F.FlightNo
+WHERE F.AirlineID = 'AA' AND F.FlightNo = 111
+FOR UPDATE;
+
+-- Create reservation
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (444, NOW(), 44.00, 440.00, NULL, 222);
+
+-- Include all legs (AA 111 has 2 legs: LGA->LAX->HND, but customer only books to LAX)
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT 444, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-05'
+FROM Leg L
+WHERE L.AirlineID = 'AA' AND L.FlightNo = 111
+ORDER BY L.LegNo;
+
+-- Add John Doe as passenger
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (444, 2, 222, '12A', 'Economy', 'Chicken');
+
+COMMIT;
+
+-- VERIFICATION:
+SELECT R.ResrNo, R.ResrDate, R.TotalFare, R.BookingFee, 
+       P.FirstName, P.LastName, RP.SeatNo, RP.Class,
+       COUNT(I.LegNo) AS NumberOfLegs,
+       MIN(APDep.City) AS FromCity,
+       MAX(APArr.City) AS ToCity,
+       MIN(L.DepAirportID) AS FromAirport,
+       MAX(L.ArrAirportID) AS ToAirport
+FROM Reservation R
+JOIN ReservationPassenger RP ON R.ResrNo = RP.ResrNo
+JOIN Person P ON RP.Id = P.Id
+JOIN Includes I ON R.ResrNo = I.ResrNo
+JOIN Leg L ON I.AirlineID = L.AirlineID 
+          AND I.FlightNo = L.FlightNo 
+          AND I.LegNo = L.LegNo
+JOIN Airport APDep ON L.DepAirportID = APDep.Id
+JOIN Airport APArr ON L.ArrAirportID = APArr.Id
+WHERE R.ResrNo = 444
+GROUP BY R.ResrNo, R.ResrDate, R.TotalFare, R.BookingFee,
+         P.FirstName, P.LastName, RP.SeatNo, RP.Class;
+
+-- Expected Output:
+-- +--------+---------------------+-----------+------------+-----------+----------+--------+---------+--------------+---------------+----------+-------------+------------+
+-- | ResrNo | ResrDate            | TotalFare | BookingFee | FirstName | LastName | SeatNo | Class   | NumberOfLegs | FromCity      | ToCity   | FromAirport | ToAirport  |
+-- +--------+---------------------+-----------+------------+-----------+----------+--------+---------+--------------+---------------+----------+-------------+------------+
+-- |    444 | 2025-11-03 15:00:00 |    440.00 |      44.00 | John      | Doe      | 12A    | Economy |            2 | New York      | Tokyo    | LGA         | HND        |
+-- +--------+---------------------+-----------+------------+-----------+----------+--------+---------+--------------+---------------+----------+-------------+------------+
+
+-- CLEANUP AFTER
+DELETE FROM ReservationPassenger WHERE ResrNo = 444;
+DELETE FROM Includes WHERE ResrNo = 444;
+DELETE FROM Reservation WHERE ResrNo = 444;
+
+-- NOTES:
+-- Domestic flights are within the same country (USA in this example).
+-- One-way means no return flight is booked.
+-- Transaction ensures atomicity across all three table inserts.
+-- FOR UPDATE lock prevents overbooking.
+-- Online bookings have RepSSN = NULL.
+
+-- ============================================================================
+-- TRANSACTION 3.3.2b: Make a Reservation (One-Way International)
+-- ============================================================================
+
+-- DEFINITION:
+-- Customer creates a one-way international flight reservation (between countries)
+
+-- INPUT PARAMETERS:
+--   @ResrNo        INTEGER       - Unique reservation number
+--   @AccountNo     INTEGER       - Customer account number
+--   @AirlineID     CHAR(2)       - Airline code
+--   @FlightNo      INTEGER       - Flight number
+--   @TravelDate    DATE          - Travel date
+--   @PassengerId   INTEGER       - Passenger person ID
+--   @PassengerAcct INTEGER       - Passenger account number
+--   @SeatNo        CHAR(5)       - Seat assignment
+--   @Class         VARCHAR(20)   - Cabin class
+--   @Meal          VARCHAR(50)   - Meal preference
+--   @TotalFare     DECIMAL(10,2) - Total fare amount
+--   @BookingFee    DECIMAL(10,2) - Booking fee (10% of fare)
+
+-- SQL STATEMENT (PARAMETERIZED):
+/*
+START TRANSACTION;
+
+-- Verify international flight (crosses country boundaries)
+SELECT DISTINCT APDep.Country AS DepartureCountry, APArr.Country AS ArrivalCountry
+FROM Leg L
+JOIN Airport APDep ON L.DepAirportID = APDep.Id
+JOIN Airport APArr ON L.ArrAirportID = APArr.Id
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+HAVING COUNT(DISTINCT APDep.Country, APArr.Country) > 1;
+
+-- Check seat availability
+SELECT (F.NoOfSeats - IFNULL(S.Seats,0)) AS AvailableSeats
+FROM Flight F
+LEFT JOIN (
+  SELECT I.AirlineID, I.FlightNo, I.Date,
+         COUNT(DISTINCT RP.Id, RP.AccountNo) AS Seats
+  FROM Includes I
+  JOIN ReservationPassenger RP ON RP.ResrNo = I.ResrNo
+  WHERE I.AirlineID = ? AND I.FlightNo = ? AND I.Date = ?
+  GROUP BY I.AirlineID, I.FlightNo, I.Date
+) S ON S.AirlineID = F.AirlineID AND S.FlightNo = F.FlightNo
+WHERE F.AirlineID = ? AND F.FlightNo = ?
+FOR UPDATE;
+
+-- Insert reservation
 INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
 VALUES (?, NOW(), ?, ?, NULL, ?);
 
@@ -124,9 +302,11 @@ COMMIT;
 */
 
 -- EXECUTION WITH DEMO DATA:
--- Parameters: ResrNo=555, AccountNo=111, AirlineID='AM', FlightNo=1337,
---             TravelDate='2011-01-13', PassengerId=1, PassengerAcct=111,
---             SeatNo='1A', Class='First', Meal='Vegetarian', 
+-- Scenario: Rick Astley books one-way international flight from USA to Madagascar
+-- Flight: Air Madagascar 1337 (JFK->TNR) on January 13, 2011
+-- Parameters: ResrNo=555, AccountNo=333, AirlineID='AM', FlightNo=1337,
+--             TravelDate='2011-01-13', PassengerId=3, PassengerAcct=333,
+--             SeatNo='1A', Class='First', Meal='Sushi',
 --             TotalFare=3300.00, BookingFee=330.00
 
 -- CLEANUP FIRST
@@ -136,38 +316,78 @@ DELETE FROM Reservation WHERE ResrNo = 555;
 
 START TRANSACTION;
 
--- Insert reservation (online booking - no RepSSN)
-INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
-VALUES (555, NOW(), 330.00, 3300.00, NULL, 111);
+-- Verify this is an international flight
+SELECT DISTINCT APDep.Country AS DepartureCountry, APArr.Country AS ArrivalCountry
+FROM Leg L
+JOIN Airport APDep ON L.DepAirportID = APDep.Id
+JOIN Airport APArr ON L.ArrAirportID = APArr.Id
+WHERE L.AirlineID = 'AM' AND L.FlightNo = 1337;
 
--- Include all legs for Air Madagascar Flight 1337
+-- Check seat availability
+SELECT (F.NoOfSeats - IFNULL(S.Seats,0)) AS AvailableSeats
+FROM Flight F
+LEFT JOIN (
+  SELECT I.AirlineID, I.FlightNo, I.Date,
+         COUNT(DISTINCT RP.Id, RP.AccountNo) AS Seats
+  FROM Includes I
+  JOIN ReservationPassenger RP ON RP.ResrNo = I.ResrNo
+  WHERE I.AirlineID = 'AM' AND I.FlightNo = 1337 AND I.Date = '2011-01-13'
+  GROUP BY I.AirlineID, I.FlightNo, I.Date
+) S ON S.AirlineID = F.AirlineID AND S.FlightNo = F.FlightNo
+WHERE F.AirlineID = 'AM' AND F.FlightNo = 1337
+FOR UPDATE;
+
+-- Insert international reservation
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (555, NOW(), 330.00, 3300.00, NULL, 333);
+
+-- Include flight leg
 INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
 SELECT 555, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-13'
 FROM Leg L
 WHERE L.AirlineID = 'AM' AND L.FlightNo = 1337
 ORDER BY L.LegNo;
 
--- Add Jane Smith as passenger
+-- Add Rick Astley as passenger
 INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
-VALUES (555, 1, 111, '1A', 'First', 'Vegetarian');
+VALUES (555, 3, 333, '1A', 'First', 'Sushi');
 
 COMMIT;
 
 -- VERIFICATION:
-SELECT R.ResrNo, R.ResrDate, R.TotalFare, P.FirstName, P.LastName, 
-       RP.SeatNo, RP.Class, COUNT(I.LegNo) AS Legs
+SELECT 
+    R.ResrNo,
+    R.ResrDate,
+    R.TotalFare,
+    P.FirstName,
+    P.LastName,
+    RP.SeatNo,
+    RP.Class,
+    APDep.City AS DepartureCity,
+    APDep.Country AS DepartureCountry,
+    APArr.City AS ArrivalCity,
+    APArr.Country AS ArrivalCountry,
+    CASE 
+        WHEN APDep.Country != APArr.Country THEN 'International'
+        ELSE 'Domestic'
+    END AS FlightType
 FROM Reservation R
 JOIN ReservationPassenger RP ON R.ResrNo = RP.ResrNo
 JOIN Person P ON RP.Id = P.Id
 JOIN Includes I ON R.ResrNo = I.ResrNo
-WHERE R.ResrNo = 555
-GROUP BY R.ResrNo, R.ResrDate, R.TotalFare, P.FirstName, 
-         P.LastName, RP.SeatNo, RP.Class;
+JOIN Leg L ON I.AirlineID = L.AirlineID 
+          AND I.FlightNo = L.FlightNo 
+          AND I.LegNo = L.LegNo
+JOIN Airport APDep ON L.DepAirportID = APDep.Id
+JOIN Airport APArr ON L.ArrAirportID = APArr.Id
+WHERE R.ResrNo = 555;
 
--- OUTPUT:
-/*
-Expected: Jane Smith, Seat 1A, First Class, 1 leg, $3300.00
-*/
+-- Expected Output:
+-- +--------+---------------------+-----------+-----------+----------+--------+-------+---------------+-------------------+--------------+-------------------+---------------+
+-- | ResrNo | ResrDate            | TotalFare | FirstName | LastName | SeatNo | Class | DepartureCity | DepartureCountry  | ArrivalCity  | ArrivalCountry    | FlightType    |
+-- +--------+---------------------+-----------+-----------+----------+--------+-------+---------------+-------------------+--------------+-------------------+---------------+
+-- |    555 | 2025-11-03 15:30:00 |   3300.00 | Rick      | Astley   | 1A     | First | New York      | United States ... | Antananarivo | Madagascar        | International |
+-- +--------+---------------------+-----------+-----------+----------+--------+-------+---------------+-------------------+--------------+-------------------+---------------+
 
 -- CLEANUP AFTER
 DELETE FROM ReservationPassenger WHERE ResrNo = 555;
@@ -175,9 +395,549 @@ DELETE FROM Includes WHERE ResrNo = 555;
 DELETE FROM Reservation WHERE ResrNo = 555;
 
 -- NOTES:
--- Online reservations have RepSSN = NULL (no customer rep involvement).
--- Transaction ensures atomicity across Reservation, Includes, ReservationPassenger.
--- Booking fee typically 10% of total fare.
+-- International flights cross country boundaries.
+-- May require passport verification in production system.
+-- Often have higher fares and different fare rules than domestic.
+-- System should check visa requirements for destination country.
+
+-- ============================================================================
+-- TRANSACTION 3.3.2c: Make a Reservation (Round-Trip)
+-- ============================================================================
+
+-- DEFINITION:
+-- Customer creates a round-trip flight reservation with outbound and return flights
+
+-- INPUT PARAMETERS:
+--   @ResrNo           INTEGER       - Unique reservation number
+--   @AccountNo        INTEGER       - Customer account number
+--   @OutboundAirline  CHAR(2)       - Outbound flight airline code
+--   @OutboundFlightNo INTEGER       - Outbound flight number
+--   @OutboundDate     DATE          - Outbound travel date
+--   @ReturnAirline    CHAR(2)       - Return flight airline code
+--   @ReturnFlightNo   INTEGER       - Return flight number
+--   @ReturnDate       DATE          - Return travel date
+--   @PassengerId      INTEGER       - Passenger person ID
+--   @PassengerAcct    INTEGER       - Passenger account number
+--   @OutboundSeatNo   CHAR(5)       - Outbound seat assignment
+--   @ReturnSeatNo     CHAR(5)       - Return seat assignment
+--   @Class            VARCHAR(20)   - Cabin class (same for both directions)
+--   @Meal             VARCHAR(50)   - Meal preference
+--   @TotalFare        DECIMAL(10,2) - Total round-trip fare
+--   @BookingFee       DECIMAL(10,2) - Booking fee (10% of fare)
+
+-- SQL STATEMENT (PARAMETERIZED):
+/*
+START TRANSACTION;
+
+-- Check length of stay requirements for outbound flight
+SELECT F.MinLengthOfStay, F.MaxLengthOfStay
+FROM Flight F
+WHERE F.AirlineID = ? AND F.FlightNo = ?;
+
+-- Verify stay length meets requirements
+-- Application code should check: DATEDIFF(@ReturnDate, @OutboundDate) 
+-- is between MinLengthOfStay and MaxLengthOfStay
+
+-- Check seat availability for both flights
+SELECT (F.NoOfSeats - IFNULL(S.Seats,0)) AS AvailableSeats
+FROM Flight F
+LEFT JOIN (
+  SELECT I.AirlineID, I.FlightNo, I.Date,
+         COUNT(DISTINCT RP.Id, RP.AccountNo) AS Seats
+  FROM Includes I
+  JOIN ReservationPassenger RP ON RP.ResrNo = I.ResrNo
+  WHERE (I.AirlineID = ? AND I.FlightNo = ? AND I.Date = ?)
+     OR (I.AirlineID = ? AND I.FlightNo = ? AND I.Date = ?)
+  GROUP BY I.AirlineID, I.FlightNo, I.Date
+) S ON S.AirlineID = F.AirlineID AND S.FlightNo = F.FlightNo
+WHERE (F.AirlineID = ? AND F.FlightNo = ?)
+   OR (F.AirlineID = ? AND F.FlightNo = ?)
+FOR UPDATE;
+
+-- Insert reservation
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (?, NOW(), ?, ?, NULL, ?);
+
+-- Include all legs of outbound flight
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT ?, L.AirlineID, L.FlightNo, L.LegNo, ?
+FROM Leg L
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+ORDER BY L.LegNo;
+
+-- Include all legs of return flight
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT ?, L.AirlineID, L.FlightNo, L.LegNo, ?
+FROM Leg L
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+ORDER BY L.LegNo;
+
+-- Add passenger
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (?, ?, ?, ?, ?, ?);
+
+COMMIT;
+*/
+
+-- EXECUTION WITH DEMO DATA:
+-- Scenario: Jane Smith books round-trip San Francisco to London and back
+-- Outbound: JetBlue 111 (SFO->BOS->LHR) on Jan 10, 2011
+-- Return: Same flight on Jan 17, 2011 (7-day stay)
+-- Parameters: ResrNo=666, AccountNo=111, OutboundAirline='JB', OutboundFlightNo=111,
+--             OutboundDate='2011-01-10', ReturnAirline='JB', ReturnFlightNo=111,
+--             ReturnDate='2011-01-17', PassengerId=1, PassengerAcct=111,
+--             OutboundSeatNo='15C', ReturnSeatNo='16D', Class='Economy',
+--             Meal='Vegetarian', TotalFare=450.00, BookingFee=45.00
+
+-- CLEANUP FIRST
+DELETE FROM ReservationPassenger WHERE ResrNo = 666;
+DELETE FROM Includes WHERE ResrNo = 666;
+DELETE FROM Reservation WHERE ResrNo = 666;
+
+START TRANSACTION;
+
+-- Check length of stay requirements
+SELECT F.MinLengthOfStay, F.MaxLengthOfStay
+FROM Flight F
+WHERE F.AirlineID = 'JB' AND F.FlightNo = 111;
+
+-- Stay length: DATEDIFF('2011-01-17', '2011-01-10') = 7 days
+-- This meets the 0-30 day requirement
+
+-- Insert round-trip reservation
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (666, NOW(), 45.00, 450.00, NULL, 111);
+
+-- Include outbound legs
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT 666, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-10'
+FROM Leg L
+WHERE L.AirlineID = 'JB' AND L.FlightNo = 111
+ORDER BY L.LegNo;
+
+-- Include return legs
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT 666, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-17'
+FROM Leg L
+WHERE L.AirlineID = 'JB' AND L.FlightNo = 111
+ORDER BY L.LegNo;
+
+-- Add Jane Smith as passenger
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (666, 1, 111, '15C', 'Economy', 'Vegetarian');
+
+COMMIT;
+
+-- VERIFICATION:
+SELECT 
+    R.ResrNo,
+    R.ResrDate AS BookedOn,
+    R.TotalFare,
+    R.BookingFee,
+    P.FirstName,
+    P.LastName,
+    RP.Class,
+    COUNT(DISTINCT I.Date) AS NumberOfTravelDates,
+    COUNT(I.LegNo) AS TotalLegs,
+    MIN(I.Date) AS OutboundDate,
+    MAX(I.Date) AS ReturnDate,
+    DATEDIFF(MAX(I.Date), MIN(I.Date)) AS StayLength,
+    'Round-Trip' AS ReservationType
+FROM Reservation R
+JOIN ReservationPassenger RP ON R.ResrNo = RP.ResrNo
+JOIN Person P ON RP.Id = P.Id
+JOIN Includes I ON R.ResrNo = I.ResrNo
+WHERE R.ResrNo = 666
+GROUP BY R.ResrNo, R.ResrDate, R.TotalFare, R.BookingFee,
+         P.FirstName, P.LastName, RP.Class;
+
+-- Expected Output:
+-- +--------+---------------------+-----------+------------+-----------+----------+---------+---------------------+-----------+--------------+------------+------------+-----------------+
+-- | ResrNo | BookedOn            | TotalFare | BookingFee | FirstName | LastName | Class   | NumberOfTravelDates | TotalLegs | OutboundDate | ReturnDate | StayLength | ReservationType |
+-- +--------+---------------------+-----------+------------+-----------+----------+---------+---------------------+-----------+--------------+------------+------------+-----------------+
+-- |    666 | 2025-11-03 16:00:00 |    450.00 |      45.00 | Jane      | Smith    | Economy |                   2 |         4 | 2011-01-10   | 2011-01-17 |          7 | Round-Trip      |
+-- +--------+---------------------+-----------+------------+-----------+----------+---------+---------------------+-----------+--------------+------------+------------+-----------------+
+
+-- CLEANUP AFTER
+DELETE FROM ReservationPassenger WHERE ResrNo = 666;
+DELETE FROM Includes WHERE ResrNo = 666;
+DELETE FROM Reservation WHERE ResrNo = 666;
+
+-- NOTES:
+-- Round-trip reservations must satisfy length-of-stay restrictions.
+-- Round-trip fares are typically discounted vs. two one-way tickets.
+-- System should validate return date is after outbound date.
+-- Should check MinLengthOfStay and MaxLengthOfStay from Flight table.
+
+-- ============================================================================
+-- TRANSACTION 3.3.2d: Make a Reservation (Multi-City)
+-- ============================================================================
+
+-- DEFINITION:
+-- Customer creates a multi-city flight reservation visiting multiple destinations
+
+-- INPUT PARAMETERS:
+--   @ResrNo        INTEGER       - Unique reservation number
+--   @AccountNo     INTEGER       - Customer account number
+--   @PassengerId   INTEGER       - Passenger person ID
+--   @PassengerAcct INTEGER       - Passenger account number
+--   @TotalFare     DECIMAL(10,2) - Total multi-city fare
+--   @BookingFee    DECIMAL(10,2) - Booking fee (10% of fare)
+--   
+--   For each flight segment:
+--   @AirlineID_N   CHAR(2)       - Airline code for segment N
+--   @FlightNo_N    INTEGER       - Flight number for segment N
+--   @Date_N        DATE          - Travel date for segment N
+--   @SeatNo_N      CHAR(5)       - Seat assignment for segment N
+--   @Class_N       VARCHAR(20)   - Cabin class for segment N
+--   @Meal_N        VARCHAR(50)   - Meal preference for segment N
+
+-- SQL STATEMENT (PARAMETERIZED):
+/*
+START TRANSACTION;
+
+-- Insert reservation
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (?, NOW(), ?, ?, NULL, ?);
+
+-- For each flight segment, include all legs
+-- Segment 1
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT ?, L.AirlineID, L.FlightNo, L.LegNo, ?
+FROM Leg L
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+ORDER BY L.LegNo;
+
+-- Segment 2
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT ?, L.AirlineID, L.FlightNo, L.LegNo, ?
+FROM Leg L
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+ORDER BY L.LegNo;
+
+-- Segment 3
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT ?, L.AirlineID, L.FlightNo, L.LegNo, ?
+FROM Leg L
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+ORDER BY L.LegNo;
+-- (Repeat for additional segments)
+
+-- Add passenger
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (?, ?, ?, ?, ?, ?);
+
+COMMIT;
+*/
+
+-- EXECUTION WITH DEMO DATA:
+-- Scenario: Rick Astley plans a world tour with 3 flight segments
+--   Segment 1: AA 111 - New York->Los Angeles->Tokyo (Jan 5)
+--   Segment 2: JB 111 - San Francisco->Boston->London (Jan 12)
+--   Segment 3: AM 1337 - New York->Madagascar (Jan 15)
+-- Parameters: ResrNo=777, AccountNo=333, PassengerId=3, PassengerAcct=333,
+--             TotalFare=4500.00, BookingFee=450.00
+
+-- CLEANUP FIRST
+DELETE FROM ReservationPassenger WHERE ResrNo = 777;
+DELETE FROM Includes WHERE ResrNo = 777;
+DELETE FROM Reservation WHERE ResrNo = 777;
+
+START TRANSACTION;
+
+-- Insert multi-city reservation
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (777, NOW(), 450.00, 4500.00, NULL, 333);
+
+-- Segment 1: American Airlines 111 on Jan 5
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT 777, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-05'
+FROM Leg L
+WHERE L.AirlineID = 'AA' AND L.FlightNo = 111
+ORDER BY L.LegNo;
+
+-- Segment 2: JetBlue 111 on Jan 12
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT 777, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-12'
+FROM Leg L
+WHERE L.AirlineID = 'JB' AND L.FlightNo = 111
+ORDER BY L.LegNo;
+
+-- Segment 3: Air Madagascar 1337 on Jan 15
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT 777, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-15'
+FROM Leg L
+WHERE L.AirlineID = 'AM' AND L.FlightNo = 1337
+ORDER BY L.LegNo;
+
+-- Add Rick Astley as passenger
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (777, 3, 333, '1A', 'First', 'Sushi');
+
+COMMIT;
+
+-- VERIFICATION:
+SELECT 
+    R.ResrNo,
+    R.ResrDate AS BookedOn,
+    R.TotalFare,
+    R.BookingFee,
+    P.FirstName,
+    P.LastName,
+    COUNT(DISTINCT CONCAT(I.AirlineID, I.FlightNo)) AS NumberOfFlights,
+    COUNT(DISTINCT I.Date) AS TravelDates,
+    COUNT(I.LegNo) AS TotalLegs,
+    MIN(I.Date) AS FirstDeparture,
+    MAX(I.Date) AS LastDeparture,
+    'Multi-City' AS ReservationType
+FROM Reservation R
+JOIN ReservationPassenger RP ON R.ResrNo = RP.ResrNo
+JOIN Person P ON RP.Id = P.Id
+JOIN Includes I ON R.ResrNo = I.ResrNo
+WHERE R.ResrNo = 777
+GROUP BY R.ResrNo, R.ResrDate, R.TotalFare, R.BookingFee,
+         P.FirstName, P.LastName;
+
+-- Expected Output:
+-- +--------+---------------------+-----------+------------+-----------+----------+-----------------+-------------+-----------+----------------+---------------+-----------------+
+-- | ResrNo | BookedOn            | TotalFare | BookingFee | FirstName | LastName | NumberOfFlights | TravelDates | TotalLegs | FirstDeparture | LastDeparture | ReservationType |
+-- +--------+---------------------+-----------+------------+-----------+----------+-----------------+-------------+-----------+----------------+---------------+-----------------+
+-- |    777 | 2025-11-03 16:30:00 |   4500.00 |     450.00 | Rick      | Astley   |               3 |           3 |         5 | 2011-01-05     | 2011-01-15    | Multi-City      |
+-- +--------+---------------------+-----------+------------+-----------+----------+-----------------+-------------+-----------+----------------+---------------+-----------------+
+
+-- Detailed itinerary:
+SELECT 
+    I.Date AS TravelDate,
+    I.AirlineID,
+    A.Name AS AirlineName,
+    I.FlightNo,
+    GROUP_CONCAT(CONCAT(AP1.City, '->', AP2.City) ORDER BY L.LegNo SEPARATOR ', ') AS Route,
+    COUNT(L.LegNo) AS Legs
+FROM Includes I
+JOIN Airline A ON I.AirlineID = A.Id
+JOIN Leg L ON I.AirlineID = L.AirlineID 
+          AND I.FlightNo = L.FlightNo 
+          AND I.LegNo = L.LegNo
+JOIN Airport AP1 ON L.DepAirportID = AP1.Id
+JOIN Airport AP2 ON L.ArrAirportID = AP2.Id
+WHERE I.ResrNo = 777
+GROUP BY I.Date, I.AirlineID, A.Name, I.FlightNo
+ORDER BY I.Date;
+
+-- Expected Output:
+-- +------------+-----------+-------------------+----------+-----------------------------------------------+------+
+-- | TravelDate | AirlineID | AirlineName       | FlightNo | Route                                         | Legs |
+-- +------------+-----------+-------------------+----------+-----------------------------------------------+------+
+-- | 2011-01-05 | AA        | American Airlines |      111 | New York->Los Angeles, Los Angeles->Tokyo     |    2 |
+-- | 2011-01-12 | JB        | JetBlue Airways   |      111 | San Francisco->Boston, Boston->London         |    2 |
+-- | 2011-01-15 | AM        | Air Madagascar    |     1337 | New York->Antananarivo                        |    1 |
+-- +------------+-----------+-------------------+----------+-----------------------------------------------+------+
+
+-- CLEANUP AFTER
+DELETE FROM ReservationPassenger WHERE ResrNo = 777;
+DELETE FROM Includes WHERE ResrNo = 777;
+DELETE FROM Reservation WHERE ResrNo = 777;
+
+-- NOTES:
+-- Multi-city allows visiting multiple destinations in one reservation.
+-- Each segment can be on different airlines with different dates.
+-- No return to origin required (unlike round-trip).
+-- Fare is sum of individual segment fares.
+-- Ideal for complex itineraries like business trips or world tours.
+-- System should validate travel dates are in logical chronological order.
+
+-- ============================================================================
+-- TRANSACTION 3.3.2e: Make a Reservation with Flexible Date/Time Search
+-- ============================================================================
+
+-- DEFINITION:
+-- Customer searches for flights with flexible dates (±N days) and then books
+-- This demonstrates the flexible date/time capability required in Section 3.3
+
+-- INPUT PARAMETERS:
+--   For Search:
+--   @DepCity       VARCHAR(50)  - Departure city
+--   @ArrCity       VARCHAR(50)  - Arrival city
+--   @PreferredDate DATE         - Preferred travel date
+--   @FlexDays      INTEGER      - Flexibility in days (e.g., ±3 days)
+--   
+--   For Booking (after customer selects from search results):
+--   @ResrNo        INTEGER       - Unique reservation number
+--   @AccountNo     INTEGER       - Customer account number
+--   @SelectedAirline CHAR(2)     - Airline from search results
+--   @SelectedFlight  INTEGER     - Flight number from search results
+--   @SelectedDate    DATE        - Actual travel date selected
+--   (plus other standard booking parameters)
+
+-- SQL STATEMENT (PARAMETERIZED):
+/*
+-- STEP 1: Flexible Date Search
+SELECT 
+    F.AirlineID,
+    A.Name AS AirlineName,
+    F.FlightNo,
+    DATE(L.DepTime) AS FlightDate,
+    MIN(L.DepTime) AS DepartureTime,
+    MAX(L.ArrTime) AS ArrivalTime,
+    TIMESTAMPDIFF(HOUR, MIN(L.DepTime), MAX(L.ArrTime)) AS TotalHours,
+    F.NoOfSeats AS TotalSeats,
+    (F.NoOfSeats - IFNULL(Booked.Seats, 0)) AS AvailableSeats,
+    MIN(FA.FareAmount) AS StartingFare,
+    COUNT(L.LegNo) AS NumberOfLegs,
+    GROUP_CONCAT(CONCAT(L.DepAirportID, '->', L.ArrAirportID) 
+                 ORDER BY L.LegNo SEPARATOR ', ') AS Route
+FROM Flight F
+JOIN Airline A ON F.AirlineID = A.Id
+JOIN Leg L ON F.AirlineID = L.AirlineID AND F.FlightNo = L.FlightNo
+JOIN Airport APDep ON L.DepAirportID = APDep.Id
+JOIN Airport APArr ON L.ArrAirportID = APArr.Id
+LEFT JOIN Fare FA ON F.AirlineID = FA.AirlineID 
+                 AND F.FlightNo = FA.FlightNo 
+                 AND FA.FareType = 'OneWay'
+LEFT JOIN (
+    SELECT I.AirlineID, I.FlightNo, I.Date, 
+           COUNT(DISTINCT RP.Id, RP.AccountNo) AS Seats
+    FROM Includes I
+    JOIN ReservationPassenger RP ON RP.ResrNo = I.ResrNo
+    GROUP BY I.AirlineID, I.FlightNo, I.Date
+) Booked ON Booked.AirlineID = F.AirlineID 
+        AND Booked.FlightNo = F.FlightNo
+WHERE APDep.City = ?
+  AND APArr.City = ?
+  AND DATE(L.DepTime) BETWEEN DATE_SUB(?, INTERVAL ? DAY) 
+                          AND DATE_ADD(?, INTERVAL ? DAY)
+  AND (F.NoOfSeats - IFNULL(Booked.Seats, 0)) > 0
+GROUP BY F.AirlineID, A.Name, F.FlightNo, DATE(L.DepTime), F.NoOfSeats, Booked.Seats
+ORDER BY FlightDate, MIN(L.DepTime), MIN(FA.FareAmount);
+
+-- STEP 2: Book Selected Flight (standard one-way booking)
+START TRANSACTION;
+
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (?, NOW(), ?, ?, NULL, ?);
+
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT ?, L.AirlineID, L.FlightNo, L.LegNo, ?
+FROM Leg L
+WHERE L.AirlineID = ? AND L.FlightNo = ?
+ORDER BY L.LegNo;
+
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (?, ?, ?, ?, ?, ?);
+
+COMMIT;
+*/
+
+-- EXECUTION WITH DEMO DATA:
+-- Scenario: Jane Smith wants to fly from San Francisco to London
+--           around January 10, 2011 (flexible ±2 days)
+-- Search Parameters: DepCity='San Francisco', ArrCity='London',
+--                   PreferredDate='2011-01-10', FlexDays=2
+
+-- STEP 1: FLEXIBLE DATE SEARCH
+SELECT 
+    F.AirlineID,
+    A.Name AS AirlineName,
+    F.FlightNo,
+    DATE(L.DepTime) AS FlightDate,
+    MIN(L.DepTime) AS DepartureTime,
+    MAX(L.ArrTime) AS ArrivalTime,
+    TIMESTAMPDIFF(HOUR, MIN(L.DepTime), MAX(L.ArrTime)) AS TotalHours,
+    F.NoOfSeats AS TotalSeats,
+    MIN(FA.FareAmount) AS StartingFare,
+    COUNT(L.LegNo) AS NumberOfLegs,
+    GROUP_CONCAT(CONCAT(L.DepAirportID, '->', L.ArrAirportID) 
+                 ORDER BY L.LegNo SEPARATOR ', ') AS Route
+FROM Flight F
+JOIN Airline A ON F.AirlineID = A.Id
+JOIN Leg L ON F.AirlineID = L.AirlineID AND F.FlightNo = L.FlightNo
+JOIN Airport APDep ON L.DepAirportID = APDep.Id
+JOIN Airport APArr ON L.ArrAirportID = APArr.Id
+LEFT JOIN Fare FA ON F.AirlineID = FA.AirlineID 
+                 AND F.FlightNo = FA.FlightNo 
+                 AND FA.FareType = 'OneWay'
+WHERE APDep.City = 'San Francisco'
+  AND APArr.City = 'London'
+  AND DATE(L.DepTime) BETWEEN DATE_SUB('2011-01-10', INTERVAL 2 DAY) 
+                          AND DATE_ADD('2011-01-10', INTERVAL 2 DAY)
+GROUP BY F.AirlineID, A.Name, F.FlightNo, DATE(L.DepTime), F.NoOfSeats
+ORDER BY DATE(L.DepTime), MIN(L.DepTime), MIN(FA.FareAmount);
+
+-- Expected Search Output:
+-- +-----------+-----------------+----------+------------+---------------------+---------------------+------------+------------+--------------+--------------+----------------------+
+-- | AirlineID | AirlineName     | FlightNo | FlightDate | DepartureTime       | ArrivalTime         | TotalHours | TotalSeats | StartingFare | NumberOfLegs | Route                |
+-- +-----------+-----------------+----------+------------+---------------------+---------------------+------------+------------+--------------+--------------+----------------------+
+-- | JB        | JetBlue Airways |      111 | 2011-01-10 | 2011-01-10 14:00:00 | 2011-01-11 05:00:00 |         15 |        150 |       250.00 |            2 | SFO->BOS, BOS->LHR   |
+-- +-----------+-----------------+----------+------------+---------------------+---------------------+------------+------------+--------------+--------------+----------------------+
+
+-- STEP 2: Customer selects JetBlue 111 on Jan 10 and books it
+-- Booking Parameters: ResrNo=888, AccountNo=111, SelectedAirline='JB',
+--                    SelectedFlight=111, SelectedDate='2011-01-10',
+--                    PassengerId=1, PassengerAcct=111, SeatNo='20A',
+--                    Class='Economy', Meal='Vegetarian',
+--                    TotalFare=250.00, BookingFee=25.00
+
+-- CLEANUP FIRST
+DELETE FROM ReservationPassenger WHERE ResrNo = 888;
+DELETE FROM Includes WHERE ResrNo = 888;
+DELETE FROM Reservation WHERE ResrNo = 888;
+
+START TRANSACTION;
+
+INSERT INTO Reservation (ResrNo, ResrDate, BookingFee, TotalFare, RepSSN, AccountNo)
+VALUES (888, NOW(), 25.00, 250.00, NULL, 111);
+
+INSERT INTO Includes (ResrNo, AirlineID, FlightNo, LegNo, Date)
+SELECT 888, L.AirlineID, L.FlightNo, L.LegNo, '2011-01-10'
+FROM Leg L
+WHERE L.AirlineID = 'JB' AND L.FlightNo = 111
+ORDER BY L.LegNo;
+
+INSERT INTO ReservationPassenger (ResrNo, Id, AccountNo, SeatNo, Class, Meal)
+VALUES (888, 1, 111, '20A', 'Economy', 'Vegetarian');
+
+COMMIT;
+
+-- VERIFICATION:
+SELECT 
+    R.ResrNo,
+    P.FirstName,
+    P.LastName,
+    R.TotalFare,
+    I.AirlineID,
+    I.FlightNo,
+    I.Date AS TravelDate,
+    RP.SeatNo,
+    RP.Class,
+    'Flexible Date Booking' AS BookingType
+FROM Reservation R
+JOIN ReservationPassenger RP ON R.ResrNo = RP.ResrNo
+JOIN Person P ON RP.Id = P.Id
+JOIN Includes I ON R.ResrNo = I.ResrNo
+WHERE R.ResrNo = 888
+LIMIT 1;
+
+-- Expected Output:
+-- +--------+-----------+----------+-----------+-----------+----------+------------+--------+---------+------------------------+
+-- | ResrNo | FirstName | LastName | TotalFare | AirlineID | FlightNo | TravelDate | SeatNo | Class   | BookingType            |
+-- +--------+-----------+----------+-----------+-----------+----------+------------+--------+---------+------------------------+
+-- |    888 | Jane      | Smith    |    250.00 | JB        |      111 | 2011-01-10 | 20A    | Economy | Flexible Date Booking  |
+-- +--------+-----------+----------+-----------+-----------+----------+------------+--------+---------+------------------------+
+
+-- CLEANUP AFTER
+DELETE FROM ReservationPassenger WHERE ResrNo = 888;
+DELETE FROM Includes WHERE ResrNo = 888;
+DELETE FROM Reservation WHERE ResrNo = 888;
+
+-- NOTES:
+-- Flexible date/time search allows customers to see options across date range.
+-- Shows all available flights within ±FlexDays of preferred date.
+-- Results sorted by date and price to help customer find best option.
+-- Customer can compare prices across different dates.
+-- Similar flexibility can be applied to departure time (e.g., ±4 hours).
+-- This is a common feature on sites like Google Flights, Kayak, Expedia.
+-- After seeing flexible options, customer books using standard reservation process.
+
 
 -- ============================================================================
 -- TRANSACTION 3.3.3: Cancel a Reservation
@@ -513,7 +1273,6 @@ LIMIT 1;
 
 -- OUTPUT:
 /*
-[PASTE YOUR OUTPUT HERE]
 Expected: John Doe's bid of $400 on AA 111, Status: Accepted
 */
 
@@ -576,7 +1335,6 @@ ORDER BY AU.Date DESC;
 
 -- OUTPUT:
 /*
-[PASTE YOUR OUTPUT HERE]
 Expected: 1 bid of $400, accepted, avg=$400, min=$400, max=$400
 */
 
@@ -668,7 +1426,6 @@ LIMIT 1;
 
 -- OUTPUT:
 /*
-[PASTE YOUR OUTPUT HERE]
 Expected: Jane Smith, $250 bid, Accepted (hidden fare is $200)
 */
 
@@ -894,7 +1651,7 @@ LIMIT 10;
 */
 
 -- EXECUTION WITH DEMO DATA:
--- Parameters: AccountNo=222 (John Doe)
+-- Parameters: AccountNo = 222 (John Doe)
 
 WITH CustomerRoutes AS (
     SELECT L.DepAirportID, L.ArrAirportID, COUNT(*) AS TimesFlown
@@ -941,5 +1698,4 @@ Expected: LGA->LAX and LAX->HND marked as "You flew this route before!"
 -- Prioritizes routes customer has traveled before (likely to book again).
 -- Shows best available fares for each route.
 -- Useful for "Recommended for You" homepage feature.
-
 
